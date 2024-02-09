@@ -1,25 +1,242 @@
-﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.6.33815.320
-MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CudaRuntime2", "CudaRuntime2\CudaRuntime2.vcxproj", "{17A0985C-217C-4666-8663-69A7301F5DE9}"
-EndProject
-Global
-	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|x64 = Debug|x64
-		Release|x64 = Release|x64
-	EndGlobalSection
-	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{17A0985C-217C-4666-8663-69A7301F5DE9}.Debug|x64.ActiveCfg = Debug|x64
-		{17A0985C-217C-4666-8663-69A7301F5DE9}.Debug|x64.Build.0 = Debug|x64
-		{17A0985C-217C-4666-8663-69A7301F5DE9}.Release|x64.ActiveCfg = Release|x64
-		{17A0985C-217C-4666-8663-69A7301F5DE9}.Release|x64.Build.0 = Release|x64
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {5B333D8A-E907-4801-91B4-1D9BAFB33B78}
-	EndGlobalSection
-EndGlobal
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
+#include <stdio.h>
+
+cudaError_t addWithCuda(float *c, const float*a, const float*b, unsigned int size);
+
+
+/*
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+
+    XXXXXXXXXXXXXXX
+
+    cudaEventRecord(stop);
+
+    cudaEventSynchronize(stop);
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+}
+*/
+
+
+__global__ void addKernel(float*c, const float*a, const float*b,int size)
+{
+
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+    if(i< size)
+     c[i] = a[i] + b[i];
+
+    
+}
+
+int main()
+{
+    
+    const int arraySize = 10000000;
+    
+
+    //const int a[arraySize] = { 1, 2, 3, 4, 5 };
+    //const int b[arraySize] = { 10, 20, 30, 40, 50 };
+    
+    //Allocate vectors a, b and c in host memory
+    float* a = (float*)malloc(arraySize * sizeof(float));
+    float* b = (float*)malloc(arraySize * sizeof(float));
+    float* c = (float*)malloc(arraySize * sizeof(float));
+    int i;
+
+    
+
+
+    //Initialize input vectors
+    for (i = 0; i < arraySize; i++)
+    {
+        a[i] = i + 1;
+        b[i] = i + 1;
+    }
+
+    //Allocate vectors in device memory
+    float* d_A;
+    cudaMalloc(&d_A, arraySize * sizeof(float));
+    float* d_B;
+    cudaMalloc(&d_B, arraySize * sizeof(float));
+    float* d_C;
+    cudaMalloc(&d_C, arraySize * sizeof(float));
+
+    //Copy vectors from host memory to device memory
+    cudaMemcpy(d_A, a, arraySize * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_B, b, arraySize * sizeof(float), cudaMemcpyHostToDevice);
+
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaError_t cudaStatus;
+
+    for (int j = 0;j < 10;j++)
+    {
+
+        cudaEventRecord(start);
+
+
+        // Add vectors in parallel.
+        cudaStatus = addWithCuda(d_C, d_A, d_B, arraySize);
+        if (cudaStatus != cudaSuccess) {
+            fprintf(stderr, "addWithCuda failed!");
+            return 1;
+        }
+
+
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        cudaMemcpy(c, d_C, arraySize * sizeof(float), cudaMemcpyDeviceToHost);
+
+
+
+        float milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+
+
+
+        /*
+        printf("array a + array b = array c\n\n");
+        for (i = 0; i < arraySize; i++)
+        {
+            printf("%d + %d = %d\n", a[i], b[i], c[i]);
+        }
+
+        printf("____________________________\n\n");
+
+        printf("{");
+
+        for (i = 0; i < arraySize; i++)
+        {
+            printf(" %d", a[i]);
+        }
+        printf(" }\n\n+\n\n{");
+
+        for (i = 0; i < arraySize; i++)
+        {
+            printf(" %d", b[i]);
+        }
+
+        printf(" }\n\n=\n\n{");
+
+        for (i = 0; i < arraySize; i++)
+        {
+            printf(" %d", c[i]);
+        }
+
+        printf(" }\n");
+        */
+
+
+
+        printf("First c: %f\nLast c: %f\nTime (in milliseconds): %f\n", c[0], c[arraySize - 1], milliseconds);
+
+    }
+    
+    
+    //printf("{1,2,3,4,5} + {10,20,30,40,50} = {%d,%d,%d,%d,%d}\n",c[0], c[1], c[2], c[3], c[4]);
+
+    // cudaDeviceReset must be called before exiting in order for profiling and
+    // tracing tools such as Nsight and Visual Profiler to show complete traces.
+    cudaStatus = cudaDeviceReset();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceReset failed!");
+        return 1;
+    }
+
+    return 0;
+}
+
+// Helper function for using CUDA to add vectors in parallel.
+cudaError_t addWithCuda(float*c, const float*a, const float*b, unsigned int size)
+{
+    float*dev_a = 0;
+    float*dev_b = 0;
+    float*dev_c = 0;
+    
+
+    cudaError_t cudaStatus;
+
+
+    // Choose which GPU to run on, change this on a multi-GPU system.
+    cudaStatus = cudaSetDevice(0);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
+        goto Error;
+    }
+
+    // Allocate GPU buffers for three vectors (two input, one output)    .
+    cudaStatus = cudaMalloc((void**)&dev_c, size * sizeof(float));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+    cudaStatus = cudaMalloc((void**)&dev_a, size * sizeof(float));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+    cudaStatus = cudaMalloc((void**)&dev_b, size * sizeof(float));
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMalloc failed!");
+        goto Error;
+    }
+
+    // Copy input vectors from host memory to GPU buffers.
+    cudaStatus = cudaMemcpy(dev_a, a, size * sizeof(float), cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
+        goto Error;
+    }
+
+    cudaStatus = cudaMemcpy(dev_b, b, size * sizeof(float), cudaMemcpyHostToDevice);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
+        goto Error;
+    }
+
+    // Launch a kernel on the GPU with one thread for each element.
+    addKernel<<<ceil((float)size/1024), 1024 >> >(dev_c, dev_a, dev_b, size);
+
+
+
+    // Check for any errors launching the kernel
+    cudaStatus = cudaGetLastError();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
+        goto Error;
+    }
+    
+    // cudaDeviceSynchronize waits for the kernel to finish, and returns
+    // any errors encountered during the launch.
+    cudaStatus = cudaDeviceSynchronize();
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
+        goto Error;
+    }
+
+    // Copy output vector from GPU buffer to host memory.
+    cudaStatus = cudaMemcpy(c, dev_c, size * sizeof(float), cudaMemcpyDeviceToHost);
+    if (cudaStatus != cudaSuccess) {
+        fprintf(stderr, "cudaMemcpy failed!");
+        goto Error;
+    }
+
+Error:
+    cudaFree(dev_c);
+    cudaFree(dev_a);
+    cudaFree(dev_b);
+    
+    return cudaStatus;
+}

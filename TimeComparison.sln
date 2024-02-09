@@ -1,25 +1,221 @@
-﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.6.33815.320
-MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TimeComparison", "TimeComparison\TimeComparison.vcxproj", "{C7F88F17-3E2C-4ACB-AEDC-F71B49F22CCF}"
-EndProject
-Global
-	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|x64 = Debug|x64
-		Release|x64 = Release|x64
-	EndGlobalSection
-	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{C7F88F17-3E2C-4ACB-AEDC-F71B49F22CCF}.Debug|x64.ActiveCfg = Debug|x64
-		{C7F88F17-3E2C-4ACB-AEDC-F71B49F22CCF}.Debug|x64.Build.0 = Debug|x64
-		{C7F88F17-3E2C-4ACB-AEDC-F71B49F22CCF}.Release|x64.ActiveCfg = Release|x64
-		{C7F88F17-3E2C-4ACB-AEDC-F71B49F22CCF}.Release|x64.Build.0 = Release|x64
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {30813881-006B-4B6E-8C63-6E9AF0E95A1E}
-	EndGlobalSection
-EndGlobal
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
+#include <stdio.h>
+
+#define TILE_DIM 16
+#define BLOCK_ROWS 16
+#define GridMultiplier 512
+
+
+
+
+cudaError_t TransposeWithCudaSharedMemory(int* New, int* Old, int *n, int *o, const int size, float &Time);
+cudaError_t TransposeWithCudaRegular(int* New, int* Old, int* n, int* o, const int size, float &Time);
+
+//--------------------------------------------KERNELS---------------------------------------------------------------
+
+
+//Kernel WITH shared memory
+__global__ void transposeMatrixWithSharedMemory(int* TransposedMat, int* OriginalMat)
+{
+
+    __shared__ float tile[TILE_DIM][TILE_DIM];
+
+    int x = blockIdx.x * TILE_DIM + threadIdx.x;
+    int y = blockIdx.y * TILE_DIM + threadIdx.y;
+    int width = gridDim.x * TILE_DIM;
+
+    //int j = 0;
+    for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS)
+    tile[(threadIdx.y + j)][threadIdx.x] = OriginalMat[(y + j) * width + x];
+
+    __syncthreads();
+
+    x = blockIdx.y * TILE_DIM + threadIdx.x;  // transpose block offset
+    y = blockIdx.x * TILE_DIM + threadIdx.y;
+
+    for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS)
+    TransposedMat[(y + j) * width + x] = tile[threadIdx.x][ threadIdx.y+j];
+}
+
+
+
+
+//Kernel WITHOUT shared memory
+__global__ void transposeMatrixWithoutSharedMemory(int* NewMat, int* OldMat)
+{
+    int x = blockIdx.x * TILE_DIM + threadIdx.x;
+    int y = blockIdx.y * TILE_DIM + threadIdx.y;
+    int width = gridDim.x * TILE_DIM;
+
+
+    int  j = 0;
+
+    //for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS)
+
+    NewMat[x * width + (y + j)] = OldMat[(y + j) * width + x];
+
+
+}
+
+
+
+//---------------------------------------------------MAIN-----------------------------------------------------------
+
+
+//int MatOld[TILE_DIM * GridMultiplier][TILE_DIM * GridMultiplier], MatNew1[TILE_DIM * GridMultiplier][TILE_DIM * GridMultiplier];
+//int MatNew2[TILE_DIM * GridMultiplier][TILE_DIM * GridMultiplier];
+cudaEvent_t start, stop;
+
+
+int main()
+{
+
+    int* old, * _new;
+    float ms1 = 0, ms2 = 0;
+    int MatSize = TILE_DIM * GridMultiplier * TILE_DIM * GridMultiplier;
+    int numBlocks = MatSize;
+    cudaError_t cudaStatus;
+
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    //cudaError_t cudaStatus;
+    int* MatOld = (int *)malloc(TILE_DIM * GridMultiplier * TILE_DIM * GridMultiplier*sizeof(int));
+    int* MatNew1 = (int*)malloc(TILE_DIM * GridMultiplier * TILE_DIM * GridMultiplier * sizeof(int));
+    int* MatNew2 = (int*)malloc(TILE_DIM * GridMultiplier * TILE_DIM * GridMultiplier * sizeof(int));
+
+    //Initializing Mat1
+    for (int i = 0; i < TILE_DIM * GridMultiplier; i++)
+    {
+        for (int j = 0; j < TILE_DIM * GridMultiplier; j++)
+        {
+            MatOld[i* TILE_DIM * GridMultiplier +j] = i;
+        }
+    }
+
+    int* n, * o;
+
+    cudaStatus = cudaMalloc((void**)&o, numBlocks * sizeof(int));
+    cudaStatus = cudaMalloc((void**)&n, numBlocks * sizeof(int));
+
+
+    for (int k = 0;k < 10;k++)
+    {
+        
+        TransposeWithCudaSharedMemory(MatNew1, MatOld,n,o, numBlocks, ms1);
+        TransposeWithCudaRegular(MatNew2, MatOld, n, o, numBlocks, ms2);
+       
+
+        printf("Time with shared memory (millisecs): %f\nTime without shared memory (millisecs): %f\n\n", ms1, ms2);
+    }
+    
+
+   
+
+    /*
+    printf("Original matrix:\n");
+    printf("-----------------\n");
+    for (int i = 0; i < TILE_DIM * GridMultiplier; i++)
+    {
+        for (int j = 0; j < TILE_DIM * GridMultiplier; j++)
+        {
+            if (MatOld[i][j] < 10)
+                printf("%d  ", MatOld[i][j]);
+            else
+                printf("%d ", MatOld[i][j]);
+        }
+        printf("\n");
+    }
+
+    printf("\n");
+    printf("Transposed matrix:\n");
+    printf("-----------------\n");
+
+    for (int i = 0; i < TILE_DIM * GridMultiplier; i++)
+    {
+        for (int j = 0; j < TILE_DIM * GridMultiplier; j++)
+        {
+            if (MatNew1[i][j] < 10)
+                printf("%d  ", MatNew1[i][j]);
+            else
+                printf("%d ", MatNew1[i][j]);
+        }
+        printf("\n");
+    }
+    */
+
+
+    return 0;
+}
+
+
+//------------------------------------------------------------------------------------------------------------------
+
+
+cudaError_t TransposeWithCudaSharedMemory(int* New, int* Old, int* n, int *o, const int size, float &Time)
+{
+
+    //int* n, * o;
+    //float milliseconds = 0;
+    dim3 threadsPerBlock(TILE_DIM, TILE_DIM);
+    dim3 BlockPerGrid(GridMultiplier, GridMultiplier);
+    cudaError_t cudaStatus;
+
+
+    cudaStatus = cudaMemcpy(o, Old, size * sizeof(int), cudaMemcpyHostToDevice);
+
+    
+    cudaEventRecord(start);
+
+    transposeMatrixWithSharedMemory << <BlockPerGrid, threadsPerBlock >> > (n, o);
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    Time = 0;
+    cudaEventElapsedTime(&Time, start, stop);
+
+
+
+    cudaStatus = cudaMemcpy(New, n, size * sizeof(int), cudaMemcpyDeviceToHost);
+
+    return (cudaError_t)0;
+
+}
+
+
+
+
+cudaError_t TransposeWithCudaRegular(int* New, int* Old, int* n, int *o,const int size, float &Time)
+{
+
+    
+    //float milliseconds = 0;
+    dim3 threadsPerBlock(TILE_DIM, TILE_DIM);
+    dim3 BlockPerGrid(GridMultiplier, GridMultiplier);
+    cudaError_t cudaStatus;
+
+
+
+    cudaStatus = cudaMemcpy(o, Old, size * sizeof(int), cudaMemcpyHostToDevice);
+
+   
+    cudaEventRecord(start);
+
+    transposeMatrixWithoutSharedMemory << <BlockPerGrid, threadsPerBlock >> > (n, o);
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    //Time = 0;
+    cudaEventElapsedTime(&Time, start, stop);
+
+
+
+    cudaStatus = cudaMemcpy(New, n, size * sizeof(int), cudaMemcpyDeviceToHost);
+
+    return (cudaError_t)0;
+
+}

@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.6.33815.320
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TransposeWithSharedMemory", "TransposeWithSharedMemory\TransposeWithSharedMemory.vcxproj", "{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}.Debug|x64.ActiveCfg = Debug|x64
+		{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}.Debug|x64.Build.0 = Debug|x64
+		{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}.Release|x64.ActiveCfg = Release|x64
+		{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {FF1455A6-47EB-40B3-860D-22C3FAB966AB}
+	EndGlobalSection
+EndGlobal

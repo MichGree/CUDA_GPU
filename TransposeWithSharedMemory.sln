@@ -1,25 +1,143 @@
-﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.6.33815.320
-MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TransposeWithSharedMemory", "TransposeWithSharedMemory\TransposeWithSharedMemory.vcxproj", "{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}"
-EndProject
-Global
-	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|x64 = Debug|x64
-		Release|x64 = Release|x64
-	EndGlobalSection
-	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}.Debug|x64.ActiveCfg = Debug|x64
-		{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}.Debug|x64.Build.0 = Debug|x64
-		{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}.Release|x64.ActiveCfg = Release|x64
-		{9B553EF5-B6E0-4919-B579-ACBE2CC007CD}.Release|x64.Build.0 = Release|x64
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {FF1455A6-47EB-40B3-860D-22C3FAB966AB}
-	EndGlobalSection
-EndGlobal
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
+#include <stdio.h>
+
+
+#define TILE_DIM 8
+#define BLOCK_ROWS 8
+#define GridMultiplier 4
+
+
+
+
+cudaError_t TransposeWithCuda(int* Old, int* New, int size);
+
+
+//------------------------------------------------------------------------------------------------------------------
+
+
+
+__global__ void transposeMatrix(int* TransposedMat, int* OriginalMat)
+{
+
+    __shared__ float tile[TILE_DIM * TILE_DIM];
+
+    int x = blockIdx.x * TILE_DIM + threadIdx.x;
+    int y = blockIdx.y * TILE_DIM + threadIdx.y;
+    int width = gridDim.x * TILE_DIM;
+
+    int j = 0;
+    //for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS)
+        tile[(threadIdx.y + j) * TILE_DIM + threadIdx.x] = OriginalMat[(y + j) * width + x];
+
+    __syncthreads();
+
+    //for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS)
+        TransposedMat[(y + j) + x * width] = tile[(threadIdx.y + j) * TILE_DIM + threadIdx.x];
+}
+
+
+//------------------------------------------------------------------------------------------------------------------
+
+
+
+int main()
+{
+
+
+    int MatOld[TILE_DIM * GridMultiplier][TILE_DIM * GridMultiplier], MatNew[TILE_DIM * GridMultiplier][TILE_DIM * GridMultiplier];
+    int* old, * _new;
+    int MatSize = TILE_DIM * GridMultiplier * TILE_DIM * GridMultiplier;
+    int numBlocks = MatSize;
+    cudaError_t cudaStatus;
+
+
+
+    //Initializing Mat1
+    for (int i = 0; i < TILE_DIM * GridMultiplier; i++)
+    {
+        for (int j = 0; j < TILE_DIM * GridMultiplier; j++)
+        {
+            MatOld[i][j] = i;
+        }
+    }
+
+
+
+    /*
+    for (int i = 0;i < GridMultiplier; i++)
+    {
+        for (int j = 0;j < GridMultiplier; j++)
+        {
+            TransposeWithCuda(&MatNew[i* GridMultiplier][j * GridMultiplier], &MatOld[i * GridMultiplier][j * GridMultiplier], numBlocks);
+        }
+    }
+    */
+
+    TransposeWithCuda(&MatNew[0][0], &MatOld[0][0], numBlocks);
+
+
+
+
+    printf("Original matrix:\n");
+    printf("-----------------\n");
+    for (int i = 0; i < TILE_DIM * GridMultiplier; i++)
+    {
+        for (int j = 0; j < TILE_DIM * GridMultiplier; j++)
+        {
+            if (MatOld[i][j] < 10)
+                printf("%d  ", MatOld[i][j]);
+            else
+                printf("%d ", MatOld[i][j]);
+        }
+        printf("\n");
+    }
+
+    printf("\n");
+    printf("Transposed matrix:\n");
+    printf("-----------------\n");
+
+    for (int i = 0; i < TILE_DIM * GridMultiplier; i++)
+    {
+        for (int j = 0; j < TILE_DIM * GridMultiplier; j++)
+        {
+            if (MatNew[i][j] < 10)
+                printf("%d  ", MatNew[i][j]);
+            else
+                printf("%d ", MatNew[i][j]);
+        }
+        printf("\n");
+    }
+
+
+
+    return 0;
+}
+
+
+//------------------------------------------------------------------------------------------------------------------
+
+
+cudaError_t TransposeWithCuda(int* New, int* Old, const int size)
+{
+
+    int* n, * o;
+    dim3 threadsPerBlock(TILE_DIM, TILE_DIM);
+    dim3 BlockPerGrid(GridMultiplier, GridMultiplier);
+    cudaError_t cudaStatus;
+
+    cudaStatus = cudaMalloc((void**)&o, size * sizeof(int));
+    cudaStatus = cudaMalloc((void**)&n, size * sizeof(int));
+
+    cudaStatus = cudaMemcpy(o, Old, size * sizeof(int), cudaMemcpyHostToDevice);
+
+    //transposeMatrix << <numBlocks, threadsPerBlock >> > (&MatNew[0][0], &MatOld[0][0]);
+
+    transposeMatrix << <BlockPerGrid, threadsPerBlock >> > (n, o);
+
+    cudaStatus = cudaMemcpy(New, n, size * sizeof(int), cudaMemcpyDeviceToHost);
+
+    return (cudaError_t)0;
+
+}

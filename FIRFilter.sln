@@ -1,25 +1,158 @@
-﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.6.33815.320
-MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FIRFilter", "FIRFilter\FIRFilter.vcxproj", "{872566BC-F614-42EB-B16C-D70F04833B81}"
-EndProject
-Global
-	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|x64 = Debug|x64
-		Release|x64 = Release|x64
-	EndGlobalSection
-	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{872566BC-F614-42EB-B16C-D70F04833B81}.Debug|x64.ActiveCfg = Debug|x64
-		{872566BC-F614-42EB-B16C-D70F04833B81}.Debug|x64.Build.0 = Debug|x64
-		{872566BC-F614-42EB-B16C-D70F04833B81}.Release|x64.ActiveCfg = Release|x64
-		{872566BC-F614-42EB-B16C-D70F04833B81}.Release|x64.Build.0 = Release|x64
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {AF72B871-4041-4BF5-949B-F06F054892C3}
-	EndGlobalSection
-EndGlobal
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
+#include <stdio.h>
+
+
+cudaError_t FilterWithCuda(float* FilteredSignal, float* OriginalSignal, float* coefficients, const int size, int lenght_in, int length_coef);
+#define TOTAL_LENGTH 300
+
+//-----------------------KERNEL--------------------------
+
+
+__global__ void FilterKernel(float *output, float *input, float *coef, int length_in, int length_coef)
+{
+
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+
+    for (int b = 0; b < length_coef; b++)
+    {
+        output[i] = output[i] + input[i + b] * coef[b];
+    }
+    
+
+}
+
+
+
+//---------------------MAIN--------------------------------
+
+
+int main()
+{
+    
+    const int coefflength = 10, inlength = 20;
+    float input[inlength], output[TOTAL_LENGTH], coeff[coefflength];
+    
+
+    float coef_rev[coefflength];
+    float in_rip[inlength + coefflength];
+
+
+    for (int i = 0; i < coefflength; i++)
+    {
+        coef_rev[i] = 0;
+    }
+
+    for (int i = 0; i < inlength; i++)
+    {
+        in_rip[i] = 0;
+    }
+
+
+    
+
+
+    //Initialize input
+    for (int i = 0; i < inlength; i++)
+    {
+        input[i] = i+1;
+    }
+
+    //Initialize coefficients
+    for (int i = 0; i < coefflength; i++)
+    {
+        coeff[i] = 1;
+    }
+
+
+
+    //--RIPUD INPUT--//
+    for (int k = 0; k < coefflength - 1; k++)
+    {
+        in_rip[k] = 0;
+    }
+    for (int k = 0; k < inlength; k++)
+    {
+        in_rip[(coefflength-1)+k] = input[k];
+    }
+
+
+    //Reversed the coefficients array
+    for (int k = 0; k < coefflength; k++)
+    {
+        coef_rev[k] = coeff[coefflength - k - 1];
+    }
+    
+
+
+    //--------//
+    
+    for (int i = 0; i < TOTAL_LENGTH; i++)
+    {
+        
+        output[i] = 0;
+        
+    }
+    
+    //--------//
+
+
+    FilterWithCuda(output, in_rip, coef_rev, TOTAL_LENGTH, inlength, coefflength);
+
+    
+    printf("Input:\n");
+
+    for (int i = 0; i < inlength; i++)
+    {
+        printf("%f\n", input[i]);
+    }
+
+    printf("\nCoefficients:\n");
+
+    for (int i = 0; i < coefflength; i++)
+    {
+        printf("%f\n", coeff[i]);
+    }
+    
+    printf("\nOutput:\n");
+
+    for (int i = 0; i < inlength; i++)
+    {
+        printf("%f\n", output[i]);
+    }
+
+    return 0;
+}
+
+
+//---------------------------------------------------------
+
+
+cudaError_t FilterWithCuda(float* FilteredSignal, float* OriginalSignal, float* reversed_coefficients, const int size, int lenght_in, int length_coef)
+{
+    float* dev_in, * dev_coef, * dev_out;
+    int numBlocks = ceil((float)lenght_in / 64);
+
+    //dim3 BlockPerGrid(GridMultiplier, GridMultiplier);
+
+    cudaMalloc((void**)&dev_in, (lenght_in+ length_coef -1)* sizeof(float));
+    cudaMalloc((void**)&dev_out, lenght_in * sizeof(float));
+    cudaMalloc((void**)&dev_coef, length_coef* sizeof(float));
+
+    //int numBlocks, ThreadsPerBlock;
+
+    cudaMemcpy(dev_in, OriginalSignal, (lenght_in + length_coef - 1) * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_coef, reversed_coefficients, length_coef * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_out, FilteredSignal, lenght_in * sizeof(float), cudaMemcpyHostToDevice);
+
+
+
+
+    FilterKernel << <numBlocks, 64 >> > (dev_out, dev_in, dev_coef, lenght_in, length_coef);
+
+    cudaMemcpy(FilteredSignal, dev_out, lenght_in * sizeof(float), cudaMemcpyDeviceToHost);
+
+    return (cudaError_t)0;
+
+}
